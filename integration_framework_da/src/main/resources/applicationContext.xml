@@ -1,0 +1,65 @@
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:camel="http://camel.apache.org/schema/spring"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans 
+		http://www.springframework.org/schema/beans/spring-beans.xsd          
+		http://camel.apache.org/schema/spring 
+		http://camel.apache.org/schema/spring/camel-spring.xsd">
+	<bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource"
+		destroy-method="close">
+        <!-- <property name="driverClassName" value="org.postgresql.Driver"/> -->
+        <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
+        <property name="url" value="jdbc:mysql://172.17.81.209:3306/mito"/>
+        <property name="username" value="root" />
+        <property name="password" value="mito" />
+    </bean>
+      
+    <bean id="myProcessor" class="com.ericsson.da.integration_framework_da.MyProcessor"/> 
+    <bean id="Logging" class="com.ericsson.da.integration_framework_da.Logging"/>
+    <bean id="WhatsApp" class="com.ericsson.da.integration_framework_da.CallingWhatsApp"/>  
+    <bean id="awsProcessor" class="com.ericsson.da.integration_framework_da.AwsProcessor"/> 
+    <bean id="sqlComponent" class="org.apache.camel.component.sql.SqlComponent">
+		<property name="dataSource" ref="dataSource" />
+	</bean>
+		<camelContext xmlns="http://camel.apache.org/schema/spring">
+	<propertyPlaceholder id="placeholder" location="classpath:sql.properties" />
+
+	 <camel:route>
+	<from uri="timer://timer1?period=15s" />
+	<to uri="sqlComponent:{{sql.selectNewTopicwo}}?consumer.useIterator=true" />
+	<camel:split>
+		<camel:simple>${body}</camel:simple>
+		<setHeader headerName="CamelHttpMethod">
+    		<constant>POST</constant>
+		</setHeader>
+		<to uri="sqlComponent:insert into whatsApp.whatsApp (incident_id,title,assignee,mobile_phone_number) values (:#id,:#title,:#assignee,:#mobile_phone_number)" />
+		<process ref="myProcessor"/>
+		<to uri="https://www.waboxapp.com/api/send/chat"/>
+		<process ref="Logging"/>
+	</camel:split>
+	<to uri="sqlComponent:{{sql.updateNewTopic}}?consumer.useIterator=true" />	
+	</camel:route> 
+	 
+	<camel:route>
+		<from uri="timer://timer1?period=15s" />
+		 <setHeader headerName="CamelHttpMethod">
+    		<constant>GET</constant>
+		</setHeader>
+		<to uri="http://18.222.145.97:5000/tasks"/>
+		<choice>
+			<when><simple>${in.body} != null</simple>
+			<process ref="awsProcessor"/>
+		<to uri="sqlComponent:update  whatsApp.whatsApp set user_response = :#action,user_response_received='Y' where incident_id= :#incident_id and mobile_phone_number = :#mobile_phone_number;" />
+		<setHeader headerName="CamelHttpMethod">
+    		<constant>DELETE</constant>
+		</setHeader>
+		<setHeader  headerName="CamelHttpUri">
+		<simple>http://18.222.145.97:5000/tasks/${header.id}</simple>
+		</setHeader>
+		<to uri="http://dummyhost" />
+		</when>
+		</choice>
+		
+	</camel:route>
+	
+	</camelContext>
+</beans>
